@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <title>Aurora Casino</title>
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/css/app.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <button class="logo" data-route="lobby" aria-label="На главную">
+      <img src="/assets/logo.svg" alt="Aurora" />
+    </button>
+    <button class="balance-pill" data-route="wallet" id="balance-pill">
+      <span class="bal-icon">$</span>
+      <span class="bal-value">0.00</span>
+      <span class="bal-chev">▾</span>
+    </button>
+    <button class="deposit-plus" data-route="deposit" aria-label="Депозит">+</button>
+    <button class="logo-mini" data-route="lobby" aria-label="Лого" style="opacity:0">
+      <img src="/assets/logo.svg" alt="" />
+    </button>
+  </header>
+
+  <main id="app" class="app"></main>
+
+  <button class="fab fab-wheel" data-route="game-wheel" aria-label="Колесо удачи">
+    <svg viewBox="0 0 32 32" width="32" height="32">
+      <defs>
+        <linearGradient id="fg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b85cff"/><stop offset="1" stop-color="#ff4d8b"/></linearGradient>
+      </defs>
+      <circle cx="16" cy="16" r="13" fill="url(#fg1)"/>
+      <path d="M16 16 L16 4 A12 12 0 0 1 26 11 Z" fill="#4dffea" opacity=".9"/>
+      <path d="M16 16 L26 22 A12 12 0 0 1 16 28 Z" fill="#ffc857"/>
+      <circle cx="16" cy="16" r="3" fill="#0a0a0a"/>
+      <path d="M16 1 L19 6 L13 6 Z" fill="#aaff00"/>
+    </svg>
+  </button>
+  <button class="fab fab-support" data-route="support" aria-label="Поддержка">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="#0a0a0a">
+      <path d="M12 1a9 9 0 0 0-9 9v7a3 3 0 0 0 3 3h2v-8H5v-2a7 7 0 0 1 14 0v2h-3v8h2a3 3 0 0 0 3-3v-7a9 9 0 0 0-9-9z"/>
+    </svg>
+  </button>
+
+  <nav class="tabs">
+    <button class="tab" data-route="wallet" aria-label="Касса">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16v2H4zm0 4h16v8H4zm3 4h6v2H7z"/></svg>
+      <span>Касса</span>
+    </button>
+    <button class="tab" data-route="games" aria-label="Игры">
+      <svg viewBox="0 0 24 24"><path d="M7 6h10a4 4 0 0 1 4 4v4a4 4 0 0 1-4 4 4 4 0 0 1-3.46-2H9.46A4 4 0 0 1 6 18a4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4z"/></svg>
+      <span>Игры</span>
+    </button>
+    <button class="tab" data-route="bonuses" aria-label="Бонусы">
+      <svg viewBox="0 0 24 24"><path d="M12 2l2.5 5 5.5.8-4 3.9.95 5.5L12 14.6l-4.95 2.6L8 11.7 4 7.8 9.5 7z"/></svg>
+      <span>Бонуси</span>
+    </button>
+    <button class="tab" data-route="lobby" aria-label="Казино">
+      <svg viewBox="0 0 24 24"><path d="M12 2l2.6 7.5H22l-6 4.4 2.3 7.1L12 16.6 5.7 21l2.3-7.1-6-4.4h7.4z"/></svg>
+      <span>Казино</span>
+    </button>
+    <button class="tab" data-route="profile" aria-label="Меню">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+      <span>Меню</span>
+    </button>
+  </nav>
+
+  <div class="toast-host" id="toast-host"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
