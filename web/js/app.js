@@ -30,8 +30,8 @@ if (tg) {
   try {
     tg.ready();
     tg.expand();
-    tg.setHeaderColor('#0a0e1a');
-    tg.setBackgroundColor('#0a0e1a');
+    tg.setHeaderColor('#000000');
+    tg.setBackgroundColor('#000000');
   } catch (e) { /* ignore */ }
 }
 
@@ -105,9 +105,7 @@ function bindBalanceUpdates() {
     const u = state.user;
     if (!u) return;
     const valNode = pill.querySelector('.bal-value');
-    const curNode = pill.querySelector('.bal-currency');
     if (valNode) valNode.textContent = (u.balance + u.bonus_balance).toFixed(2);
-    if (curNode) curNode.textContent = u.currency || 'AC';
   }
   subscribe(update);
   update();

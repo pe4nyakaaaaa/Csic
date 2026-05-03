@@ -1,93 +1,122 @@
 import { api } from '../api.js';
-import { betControls } from '../bet_controls.js';
-import { confettiBurst, el, fmt, flashEl, toast } from '../ui.js';
+import { betPanel, gameShell, historyStrip } from '../game_shell.js';
+import { el, fmt, flashEl, toast } from '../ui.js';
 import { refreshUser } from '../state.js';
+
+const HISTORY = [];
 
 export function diceGame() {
   let target = 50, direction = 'under';
 
-  const display = el('div', { class: 'dice-roll-display' }, '00.00');
-  const status = el('div', { class: 'muted center mt-8' }, 'Сделайте ставку');
-  const stage = el('div', { class: 'dice-stage' }, display, status);
+  const histStrip = historyStrip(HISTORY.slice(0, 12), { label: 'Броски' });
 
-  const slider = el('input', { class: 'slider', type: 'range', min: '1', max: '99', step: '0.01', value: '50' });
-  slider.style.setProperty('--pct', `${target}%`);
-  const targetLabel = el('span', { class: 'kicker' }, 'Цель');
-  const targetVal = el('div', { style: { fontSize: '20px', fontWeight: 800 } }, target.toFixed(2));
-  const winChance = el('span', { class: 'muted' }, `Шанс: ${target.toFixed(2)}%`);
-  const multLabel = el('span', { style: { fontWeight: 800 } }, '1.98×');
+  const result = el('div', { class: 'dice-result' }, '50.00');
 
-  const dirChips = el('div', { class: 'row gap-8' },
-    chip('Под', 'under', true),
-    chip('Над', 'over', false),
+  const track = el('div', { class: 'dice-track' });
+  const winZone = el('div', { class: 'win-zone' });
+  const loseZone = el('div', { class: 'lose-zone' });
+  const marker = el('div', { class: 'marker' });
+  track.append(loseZone, winZone, marker);
+
+  const slider = document.createElement('input');
+  slider.type = 'range'; slider.min = '1'; slider.max = '99'; slider.step = '0.01'; slider.value = '50';
+  slider.style.cssText = 'width:100%;margin-top:4px;accent-color:#c5ff00;';
+
+  const dirRow = el('div', { class: 'dice-mode' });
+  const underBtn = el('button', { class: 'active' }, 'Под');
+  const overBtn = el('button', {}, 'Над');
+  underBtn.addEventListener('click', () => { direction = 'under'; underBtn.classList.add('active'); overBtn.classList.remove('active'); update(); });
+  overBtn.addEventListener('click', () => { direction = 'over'; overBtn.classList.add('active'); underBtn.classList.remove('active'); update(); });
+  dirRow.append(underBtn, overBtn);
+
+  const stage = el('div', { class: 'stage dice-stage' },
+    result,
+    track,
+    slider,
+    dirRow,
   );
-  function chip(text, value, isActive) {
-    const c = el('button', { class: `chip ${isActive ? 'active' : ''}`, onclick: () => {
-      direction = value;
-      Array.from(dirChips.children).forEach(x => x.classList.remove('active'));
-      c.classList.add('active');
-      updateMath();
-    } }, text);
-    return c;
-  }
 
-  function updateMath() {
-    targetVal.textContent = target.toFixed(2);
+  function update() {
+    target = Math.max(1, Math.min(99, Number(slider.value) || 50));
+    if (direction === 'under') {
+      winZone.style.left = '0%';
+      winZone.style.width = target + '%';
+      loseZone.style.left = target + '%';
+      loseZone.style.width = (100 - target) + '%';
+    } else {
+      loseZone.style.left = '0%';
+      loseZone.style.width = target + '%';
+      winZone.style.left = target + '%';
+      winZone.style.width = (100 - target) + '%';
+    }
+    marker.style.left = target + '%';
     const chance = direction === 'under' ? target : (100 - target);
-    winChance.textContent = `Шанс: ${chance.toFixed(2)}%`;
     const mult = chance > 0 ? (99 / chance) : 0;
-    multLabel.textContent = `${mult.toFixed(2)}×`;
-    slider.style.setProperty('--pct', `${target}%`);
+    panel.setMultiplier(mult.toFixed(2) + '×');
+    panel.setPayout(fmt(panel.getValue() * mult));
   }
-  slider.addEventListener('input', () => { target = Number(slider.value); updateMath(); });
+  slider.addEventListener('input', update);
 
-  const ctrl = betControls({
+  const panel = betPanel({
+    label: 'Бросить',
+    payoutText: 'Выплата',
+    onAmountChange: () => update(),
     onPlay: async (bet) => {
-      if (bet <= 0) return toast('Введите сумму ставки', 'error');
-      ctrl.setBusy(true);
-      status.textContent = 'Бросаем кубик…';
+      if (bet <= 0) return toast('Введите ставку', 'error');
+      panel.setBusy(true);
       try {
         const r = await api.play('dice', bet, { target, direction });
-        const { result, win, multiplier, payout } = r;
-        display.textContent = result.roll.toFixed(2);
-        if (win) {
-          status.innerHTML = `🎉 Выигрыш: <span class="win">+${fmt(payout, 2)} AC</span> (${multiplier}×)`;
-          confettiBurst(40);
-        } else {
-          status.innerHTML = `<span class="lose">Проигрыш</span> · бросок ${result.roll.toFixed(2)}`;
-        }
+        // animate roll
+        await rollAnimation(result, r.result.roll);
+        HISTORY.unshift({ value: r.result.roll.toFixed(2), win: r.win, lose: !r.win });
+        rerender(histStrip);
         flashEl(document.getElementById('balance-pill'));
         await refreshUser();
       } catch (err) {
         toast(err.message || 'Ошибка', 'error');
-        status.textContent = 'Ошибка';
       } finally {
-        ctrl.setBusy(false);
+        panel.setBusy(false);
       }
     },
   });
 
-  return el('div', { class: 'page' },
-    gameHeader('🎲', 'Dice'),
+  // initial paint
+  update();
+
+  return gameShell({
+    gameId: 'dice',
+    title: 'Dice',
+    history: histStrip,
     stage,
-    el('div', { class: 'card mt-12' },
-      el('div', { class: 'row between' },
-        el('div', {}, targetLabel, targetVal),
-        el('div', { class: 'right' },
-          el('div', { class: 'kicker' }, 'Множитель'),
-          multLabel,
-        ),
-      ),
-      el('div', { class: 'mt-12' }, slider),
-      el('div', { class: 'row between mt-8' }, winChance, dirChips),
-    ),
-    ctrl.node,
-  );
+    controls: panel.node,
+  });
 }
 
-function gameHeader(emoji, name) {
-  return el('div', { class: 'game-header' },
-    el('div', { class: 'title' }, el('span', {}, emoji), el('span', {}, name)),
-    el('a', { class: 'btn outline', href: '#/games' }, '← Назад'),
-  );
+function rollAnimation(node, finalVal) {
+  return new Promise(res => {
+    const t0 = performance.now();
+    const dur = 700;
+    function step(t) {
+      const p = Math.min(1, (t - t0) / dur);
+      if (p < 1) {
+        node.textContent = (Math.random() * 100).toFixed(2);
+        requestAnimationFrame(step);
+      } else {
+        node.textContent = finalVal.toFixed(2);
+        res();
+      }
+    }
+    requestAnimationFrame(step);
+  });
+}
+
+function rerender(strip) {
+  while (strip.children.length > 1) strip.removeChild(strip.lastChild);
+  HISTORY.slice(0, 12).forEach(it => {
+    const cls = 'hist-pill' + (it.win ? ' win' : ' lose');
+    const sp = document.createElement('span');
+    sp.className = cls;
+    sp.textContent = it.value;
+    strip.appendChild(sp);
+  });
 }

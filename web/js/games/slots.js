@@ -1,44 +1,83 @@
 import { api } from '../api.js';
-import { betControls } from '../bet_controls.js';
-import { confettiBurst, el, fmt, flashEl, toast } from '../ui.js';
+import { betPanel, gameShell, historyStrip } from '../game_shell.js';
+import { el, fmt, flashEl, toast } from '../ui.js';
 import { refreshUser } from '../state.js';
 
-const ALL_SYMBOLS = ['🍒','🍋','🍇','🔔','7️⃣','💎'];
+const HISTORY = [];
+const ALL_SYMBOLS = ['🍒','🍋','🍇','🔔','7','💎'];
+const PAYOUTS = [
+  { sym: '💎💎💎', mul: '×100' },
+  { sym: '7  7  7', mul: '×25' },
+  { sym: '🔔🔔🔔', mul: '×12' },
+  { sym: '🍇🍇🍇', mul: '×6' },
+  { sym: '🍋🍋🍋', mul: '×4' },
+  { sym: '🍒🍒🍒', mul: '×2' },
+];
 
 export function slotsGame() {
-  const reels = [
-    el('div', { class: 'slot-reel' }, el('span', { class: 'slot-symbol' }, '🎰')),
-    el('div', { class: 'slot-reel' }, el('span', { class: 'slot-symbol' }, '🎰')),
-    el('div', { class: 'slot-reel' }, el('span', { class: 'slot-symbol' }, '🎰')),
-  ];
-  const stage = el('div', { class: 'slots-stage' }, ...reels);
-  const status = el('div', { class: 'muted center mt-8' }, 'Нажмите «Крутить»');
+  const histStrip = historyStrip(HISTORY.slice(0, 12), { label: 'Спины' });
 
-  const ctrl = betControls({
+  const reels = [];
+  const symbols = [];
+  for (let i = 0; i < 3; i++) {
+    const r = document.createElement('div');
+    r.className = 'slot-reel-v2';
+    const s = document.createElement('div');
+    s.className = 'symbol';
+    s.textContent = '?';
+    r.appendChild(s);
+    reels.push(r); symbols.push(s);
+  }
+
+  const reelGrid = el('div', { class: 'slots-reels' }, ...reels);
+  const frame = el('div', { class: 'slots-frame' }, reelGrid);
+  const status = el('div', { style: 'text-align:center;margin-top:10px;font-size:13px;color:var(--muted);font-weight:700;' }, 'Готов к спину');
+  const stage = el('div', { class: 'slots-stage-v2' }, frame, status);
+
+  const paytable = el('div', { class: 'card' },
+    el('div', { class: 'kicker' }, 'Таблица выплат'),
+    el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;font-size:13px;' },
+      ...PAYOUTS.map(p => el('div', { class: 'row between', style: 'background:var(--bg-3);padding:8px 10px;border-radius:8px;' },
+        el('span', { style: 'font-size:14px;letter-spacing:2px;' }, p.sym),
+        el('span', { style: 'color:var(--lime);font-weight:800;' }, p.mul),
+      )),
+    ),
+  );
+
+  const panel = betPanel({
+    label: 'Крутить',
+    payoutText: 'Макс. выплата',
+    payoutValue: '×100',
     onPlay: async (bet) => {
       if (bet <= 0) return toast('Введите ставку', 'error');
-      ctrl.setBusy(true);
+      panel.setBusy(true);
       status.textContent = 'Барабаны крутятся…';
       reels.forEach(r => r.classList.add('spinning'));
-      const tickers = reels.map(r => {
-        return setInterval(() => {
-          r.firstChild.textContent = ALL_SYMBOLS[Math.floor(Math.random() * ALL_SYMBOLS.length)];
-        }, 80);
-      });
+      const tickers = symbols.map(s => setInterval(() => {
+        s.textContent = ALL_SYMBOLS[Math.floor(Math.random() * ALL_SYMBOLS.length)];
+      }, 70));
       try {
         const r = await api.play('slots', bet, {});
-        await new Promise(res => setTimeout(res, 700));
-        tickers.forEach(t => clearInterval(t));
-        reels.forEach((reel, i) => {
-          reel.classList.remove('spinning');
-          reel.firstChild.textContent = r.result.reels[i];
-        });
+        await new Promise(res => setTimeout(res, 600));
+        clearInterval(tickers[0]);
+        symbols[0].textContent = String(r.result.reels[0]);
+        reels[0].classList.remove('spinning');
+        await new Promise(res => setTimeout(res, 250));
+        clearInterval(tickers[1]);
+        symbols[1].textContent = String(r.result.reels[1]);
+        reels[1].classList.remove('spinning');
+        await new Promise(res => setTimeout(res, 250));
+        clearInterval(tickers[2]);
+        symbols[2].textContent = String(r.result.reels[2]);
+        reels[2].classList.remove('spinning');
+
         if (r.win) {
-          status.innerHTML = `🎉 +${fmt(r.payout)} AC (${r.multiplier}×)`;
-          confettiBurst(50);
+          status.innerHTML = `<span style="color:var(--lime);">+${fmt(r.payout)} AC (${r.multiplier}×)</span>`;
         } else {
-          status.innerHTML = `<span class="lose">Не выиграли</span>`;
+          status.textContent = 'Не повезло';
         }
+        HISTORY.unshift({ value: r.win ? `+${fmt(r.payout)}` : '—', win: r.win, lose: !r.win, big: r.multiplier >= 10 });
+        rerender(histStrip);
         flashEl(document.getElementById('balance-pill'));
         await refreshUser();
       } catch (err) {
@@ -46,35 +85,28 @@ export function slotsGame() {
         reels.forEach(r => r.classList.remove('spinning'));
         toast(err.message || 'Ошибка', 'error');
       } finally {
-        ctrl.setBusy(false);
+        panel.setBusy(false);
       }
     },
-    label: '🎰 Крутить',
   });
 
-  return el('div', { class: 'page' },
-    el('div', { class: 'game-header' },
-      el('div', { class: 'title' }, '🎰 Slots'),
-      el('a', { class: 'btn outline', href: '#/games' }, '← Назад'),
-    ),
+  return gameShell({
+    gameId: 'slots',
+    title: 'Slots',
+    history: histStrip,
     stage,
-    status,
-    el('div', { class: 'card mt-12' },
-      el('div', { class: 'h' }, 'Таблица выплат'),
-      el('div', { class: 'col gap-6' },
-        ...[
-          ['💎 💎 💎', '×100'],
-          ['7️⃣ 7️⃣ 7️⃣', '×25'],
-          ['🔔 🔔 🔔', '×12'],
-          ['🍇 🍇 🍇', '×6'],
-          ['🍋 🍋 🍋', '×4'],
-          ['🍒 🍒 🍒', '×2'],
-          ['Любая пара', '×0.5'],
-        ].map(([k, v]) => el('div', { class: 'row between' },
-          el('span', {}, k), el('span', { class: 'muted' }, v)
-        )),
-      ),
-    ),
-    ctrl.node,
-  );
+    extras: paytable,
+    controls: panel.node,
+  });
+}
+
+function rerender(strip) {
+  while (strip.children.length > 1) strip.removeChild(strip.lastChild);
+  HISTORY.slice(0, 12).forEach(it => {
+    const cls = 'hist-pill' + (it.big ? ' big' : it.win ? ' win' : ' lose');
+    const sp = document.createElement('span');
+    sp.className = cls;
+    sp.textContent = it.value;
+    strip.appendChild(sp);
+  });
 }

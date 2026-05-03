@@ -1,89 +1,116 @@
 import { api } from '../api.js';
-import { betControls } from '../bet_controls.js';
-import { confettiBurst, el, fmt, flashEl, toast } from '../ui.js';
+import { betPanel, gameShell, historyStrip } from '../game_shell.js';
+import { el, fmt, flashEl, toast } from '../ui.js';
 import { refreshUser } from '../state.js';
 
-const RANK_LABELS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+const RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+const SUITS = [
+  { sym: '♠', color: 'black' },
+  { sym: '♥', color: 'red' },
+  { sym: '♣', color: 'black' },
+  { sym: '♦', color: 'red' },
+];
+const HISTORY = [];
 
 export function hiloGame() {
   let current = 6, guess = 'higher';
+  let currentSuit = 0;
 
-  const cardCurrent = el('div', { class: 'center', style: cardStyle('#b85cff') }, RANK_LABELS[current]);
-  const cardNext = el('div', { class: 'center', style: cardStyle('#ff4d8b', true) }, '?');
-  const stage = el('div', { class: 'card row gap-12 center' }, cardCurrent, cardNext);
-  const status = el('div', { class: 'muted center mt-8' }, '—');
+  const histStrip = historyStrip(HISTORY.slice(0, 12), { label: 'Раскрыто' });
 
-  const currentInput = el('input', { class: 'input', type: 'number', min: '0', max: '12', value: '6' });
-  currentInput.addEventListener('input', () => {
-    current = Math.max(0, Math.min(12, parseInt(currentInput.value) || 6));
-    cardCurrent.textContent = RANK_LABELS[current];
-  });
+  const stage = el('div', { class: 'stage hilo-stage' });
 
-  const guessRow = el('div', { class: 'row gap-8' },
-    chip('▲ Выше', 'higher', true),
-    chip('▼ Ниже', 'lower', false),
+  const row = el('div', { style: 'display:flex;gap:14px;align-items:center;' });
+  const currentCard = renderCard(current, currentSuit);
+  const arrow = el('div', { style: 'font-size:32px;color:var(--lime);font-weight:900;' }, '→');
+  const nextCard = renderCard(null, null);
+  row.append(currentCard, arrow, nextCard);
+  stage.appendChild(row);
+
+  const guessRow = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;' });
+  const higherBtn = el('button', { class: 'roulette-bet selected' }, '▲ Выше');
+  const lowerBtn = el('button', { class: 'roulette-bet' }, '▼ Ниже');
+  higherBtn.addEventListener('click', () => { guess = 'higher'; higherBtn.classList.add('selected'); lowerBtn.classList.remove('selected'); });
+  lowerBtn.addEventListener('click', () => { guess = 'lower'; lowerBtn.classList.add('selected'); higherBtn.classList.remove('selected'); });
+  guessRow.append(higherBtn, lowerBtn);
+  stage.appendChild(guessRow);
+
+  const currentField = el('div', { class: 'field-card' },
+    el('div', { class: 'lbl' }, 'Текущий ранг (0=2 … 12=A)'),
+    Object.assign(document.createElement('input'), {
+      type: 'number', min: '0', max: '12', value: '6',
+      oninput(e) {
+        current = Math.max(0, Math.min(12, parseInt(e.target.value) || 6));
+        currentSuit = (currentSuit + 1) % 4;
+        const newCard = renderCard(current, currentSuit);
+        currentCard.replaceWith(newCard);
+        currentCard.parentNode?.replaceChild(newCard, currentCard);
+      }
+    }),
   );
-  function chip(text, value, isActive) {
-    const c = el('button', { class: `chip ${isActive ? 'active' : ''}`, onclick: () => {
-      guess = value;
-      Array.from(guessRow.children).forEach(x => x.classList.remove('active'));
-      c.classList.add('active');
-    } }, text);
-    return c;
-  }
 
-  const ctrl = betControls({
+  const panel = betPanel({
+    label: 'Раскрыть',
+    payoutText: 'Выплата',
     onPlay: async (bet) => {
       if (bet <= 0) return toast('Введите ставку', 'error');
-      ctrl.setBusy(true);
-      status.textContent = 'Карта раскрывается…';
-      cardNext.textContent = '?';
+      panel.setBusy(true);
       try {
         const r = await api.play('hilo', bet, { current, guess });
-        cardNext.textContent = RANK_LABELS[r.result.next_card];
-        cardNext.style.borderColor = r.win ? '#2ee49a' : '#ff5566';
-        if (r.win) {
-          status.innerHTML = `🎉 ${RANK_LABELS[r.result.next_card]} > ${RANK_LABELS[current]} ` +
-            `→ +${fmt(r.payout)} AC`;
-          confettiBurst(40);
-        } else {
-          status.innerHTML = `<span class="lose">${RANK_LABELS[r.result.next_card]} ` +
-            `${guess === 'higher' ? '≤' : '≥'} ${RANK_LABELS[current]}</span>`;
-        }
+        const nextSuit = Math.floor(Math.random() * 4);
+        const newCard = renderCard(r.result.next_card, nextSuit);
+        nextCard.parentNode?.replaceChild(newCard, nextCard);
+        HISTORY.unshift({ value: RANKS[r.result.next_card], win: r.win, lose: !r.win });
+        rerender(histStrip);
         flashEl(document.getElementById('balance-pill'));
         await refreshUser();
       } catch (err) {
         toast(err.message || 'Ошибка', 'error');
       } finally {
-        ctrl.setBusy(false);
+        panel.setBusy(false);
       }
     },
-    label: '🃏 Раскрыть',
   });
 
-  return el('div', { class: 'page' },
-    el('div', { class: 'game-header' },
-      el('div', { class: 'title' }, '🃏 Hi-Lo'),
-      el('a', { class: 'btn outline', href: '#/games' }, '← Назад'),
-    ),
+  return gameShell({
+    gameId: 'hilo',
+    title: 'Hi-Lo',
+    history: histStrip,
     stage,
-    status,
-    el('div', { class: 'card mt-12' },
-      el('div', { class: 'label' }, 'Текущий ранг (0=2 … 12=A)'),
-      currentInput,
-      el('div', { class: 'label mt-12' }, 'Прогноз'),
-      guessRow,
+    extras: currentField,
+    controls: panel.node,
+  });
+}
+
+function renderCard(rank, suitIdx) {
+  if (rank === null) {
+    return el('div', { class: 'hilo-card', style: 'border-style: dashed; opacity:.6;' },
+      el('div', { class: 'corner-tl' }, '?'),
+      el('div', { class: 'center', style: 'font-size:80px;color:#999;' }, '?'),
+      el('div', { class: 'corner-br' }, '?'),
+    );
+  }
+  const suit = SUITS[suitIdx % SUITS.length];
+  return el('div', { class: 'hilo-card ' + suit.color },
+    el('div', { class: 'corner-tl' },
+      el('span', {}, RANKS[rank]),
+      el('span', { style: 'font-size:18px;line-height:1;' }, suit.sym),
     ),
-    ctrl.node,
+    el('div', { class: 'center' }, suit.sym),
+    el('div', { class: 'corner-br' },
+      el('span', {}, RANKS[rank]),
+      el('span', { style: 'font-size:18px;line-height:1;' }, suit.sym),
+    ),
   );
 }
 
-function cardStyle(color, dashed = false) {
-  return {
-    width: '90px', height: '130px', borderRadius: '14px',
-    background: 'linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01))',
-    border: `${dashed ? '2px dashed' : '2px solid'} ${color}`,
-    fontSize: '40px', fontWeight: '900',
-    boxShadow: `0 8px 24px ${color}40`,
-  };
+function rerender(strip) {
+  while (strip.children.length > 1) strip.removeChild(strip.lastChild);
+  HISTORY.slice(0, 12).forEach(it => {
+    const cls = 'hist-pill' + (it.win ? ' win' : ' lose');
+    const sp = document.createElement('span');
+    sp.className = cls;
+    sp.textContent = it.value;
+    strip.appendChild(sp);
+  });
 }

@@ -1,70 +1,80 @@
 import { api } from '../api.js';
-import { betControls } from '../bet_controls.js';
-import { confettiBurst, el, fmt, flashEl, toast } from '../ui.js';
+import { betPanel, gameShell, historyStrip } from '../game_shell.js';
+import { el, fmt, flashEl, toast } from '../ui.js';
 import { refreshUser } from '../state.js';
+
+const HISTORY = [];
 
 export function coinflipGame() {
   let side = 'heads';
+  let totalRot = 0;
 
-  const coin = el('div', { class: 'center', style: {
-    fontSize: '80px', height: '160px',
-    transition: 'transform 0.6s cubic-bezier(.2,.8,.2,1)',
-  } }, '🪙');
-  const stage = el('div', { class: 'card center', style: { padding: '20px' } }, coin);
-  const status = el('div', { class: 'muted center mt-8' }, 'Выберите сторону');
+  const histStrip = historyStrip(HISTORY.slice(0, 12), { label: 'Броски' });
 
-  const sideRow = el('div', { class: 'row gap-8' },
-    chip('Орёл', 'heads', true),
-    chip('Решка', 'tails', false),
-  );
-  function chip(text, value, isActive) {
-    const c = el('button', { class: `chip ${isActive ? 'active' : ''}`, onclick: () => {
-      side = value;
-      Array.from(sideRow.children).forEach(x => x.classList.remove('active'));
-      c.classList.add('active');
-    } }, text);
-    return c;
-  }
+  const headsFace = el('div', { class: 'face heads' }, 'A');
+  const tailsFace = el('div', { class: 'face tails' }, 'R');
+  const coin = el('div', { class: 'cf-coin' }, headsFace, tailsFace);
 
-  const ctrl = betControls({
+  const status = el('div', { style: 'font-size:13px;font-weight:700;color:var(--muted);' }, 'Выбери сторону и брось');
+
+  const pickRow = el('div', { class: 'cf-pick' });
+  const headsBtn = el('button', { class: 'active' }, '🟡 Орёл');
+  const tailsBtn = el('button', {}, '⚪ Решка');
+  headsBtn.addEventListener('click', () => { side = 'heads'; headsBtn.classList.add('active'); tailsBtn.classList.remove('active'); });
+  tailsBtn.addEventListener('click', () => { side = 'tails'; tailsBtn.classList.add('active'); headsBtn.classList.remove('active'); });
+  pickRow.append(headsBtn, tailsBtn);
+
+  const stage = el('div', { class: 'stage cf-stage' }, coin, status, pickRow);
+
+  const panel = betPanel({
+    label: 'Бросить',
+    payoutText: 'Выплата',
+    multiplierValue: '×2',
+    onAmountChange: (v) => panel.setPayout(fmt(v * 2)),
     onPlay: async (bet) => {
-      if (bet <= 0) return toast('Введите сумму ставки', 'error');
-      ctrl.setBusy(true);
-      status.textContent = 'Подбрасываем монетку…';
-      coin.style.transform = 'rotateY(720deg)';
+      if (bet <= 0) return toast('Введите ставку', 'error');
+      panel.setBusy(true);
       try {
         const r = await api.play('coinflip', bet, { side });
-        await new Promise(res => setTimeout(res, 600));
-        coin.textContent = r.result.outcome === 'heads' ? '🪙' : '🌟';
-        coin.style.transform = 'rotateY(0)';
+        const turns = 5;
+        const final = r.result.outcome === 'heads' ? 0 : 180;
+        totalRot += turns * 360 + final;
+        coin.style.transform = `rotateY(${totalRot}deg)`;
+        await new Promise(res => setTimeout(res, 1500));
         if (r.win) {
-          status.innerHTML = `🎉 Выигрыш: <span class="win">+${fmt(r.payout)} AC</span>`;
-          confettiBurst(40);
+          status.innerHTML = `<span style="color:var(--lime);">+${fmt(r.payout)} AC</span>`;
         } else {
-          status.innerHTML = `<span class="lose">Не повезло</span>`;
+          status.innerHTML = `Не повезло, выпало ${r.result.outcome === 'heads' ? 'Орёл' : 'Решка'}`;
         }
+        HISTORY.unshift({ value: r.result.outcome === 'heads' ? 'A' : 'R', win: r.win, lose: !r.win });
+        rerender(histStrip);
         flashEl(document.getElementById('balance-pill'));
         await refreshUser();
       } catch (err) {
         toast(err.message || 'Ошибка', 'error');
-        status.textContent = 'Ошибка';
       } finally {
-        ctrl.setBusy(false);
+        panel.setBusy(false);
       }
     },
   });
+  panel.setPayout(fmt(panel.getValue() * 2));
 
-  return el('div', { class: 'page' },
-    el('div', { class: 'game-header' },
-      el('div', { class: 'title' }, '🪙 Coinflip'),
-      el('a', { class: 'btn outline', href: '#/games' }, '← Назад'),
-    ),
+  return gameShell({
+    gameId: 'coinflip',
+    title: 'Coinflip',
+    history: histStrip,
     stage,
-    status,
-    el('div', { class: 'card mt-12' },
-      el('div', { class: 'label' }, 'Сторона'),
-      sideRow,
-    ),
-    ctrl.node,
-  );
+    controls: panel.node,
+  });
+}
+
+function rerender(strip) {
+  while (strip.children.length > 1) strip.removeChild(strip.lastChild);
+  HISTORY.slice(0, 12).forEach(it => {
+    const cls = 'hist-pill' + (it.win ? ' win' : ' lose');
+    const sp = document.createElement('span');
+    sp.className = cls;
+    sp.textContent = it.value;
+    strip.appendChild(sp);
+  });
 }

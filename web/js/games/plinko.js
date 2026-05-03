@@ -1,142 +1,178 @@
 import { api } from '../api.js';
-import { betControls } from '../bet_controls.js';
-import { confettiBurst, el, fmt, flashEl, toast } from '../ui.js';
+import { betPanel, gameShell, historyStrip } from '../game_shell.js';
+import { el, fmt, flashEl, toast } from '../ui.js';
 import { refreshUser } from '../state.js';
+
+const HISTORY = [];
 
 export function plinkoGame() {
   let rows = 12, risk = 'medium';
-  const stage = el('div', { class: 'plinko-stage' });
-  const canvas = el('canvas', { width: 300, height: 280 });
-  stage.append(canvas);
-  const binsHost = el('div', { class: 'plinko-bins' });
 
-  const status = el('div', { class: 'muted center mt-8' }, 'Бросьте шарик');
+  const histStrip = historyStrip(HISTORY.slice(0, 12), { label: 'Броски' });
 
-  const rowChips = el('div', { class: 'row wrap gap-6' });
-  for (const r of [8, 10, 12, 14, 16]) {
-    const c = el('button', { class: `chip ${r === rows ? 'active' : ''}`,
-      onclick: () => { rows = r;
-        Array.from(rowChips.children).forEach(x => x.classList.remove('active'));
-        c.classList.add('active');
-        renderBins();
-      } }, `${r} рядов`);
-    rowChips.appendChild(c);
-  }
-  const riskChips = el('div', { class: 'row wrap gap-6' });
-  for (const rk of ['low','medium','high']) {
-    const c = el('button', { class: `chip ${rk === risk ? 'active' : ''}`,
-      onclick: () => { risk = rk;
-        Array.from(riskChips.children).forEach(x => x.classList.remove('active'));
-        c.classList.add('active');
-      } }, rk);
-    riskChips.appendChild(c);
-  }
+  const stage = el('div', { class: 'stage plinko-stage' });
+  const canvas = document.createElement('canvas');
+  canvas.width = 360; canvas.height = 360;
+  stage.appendChild(canvas);
+  drawPlinko(canvas, rows, [], null, []);
 
-  function renderBins(table) {
+  const binsHost = el('div', { style: 'display:grid;gap:4px;margin-top:6px;', id: 'plinko-bins' });
+
+  // Rows row
+  const rowsRow = el('div', { class: 'plinko-rows' });
+  [8, 10, 12, 14, 16].forEach(r => {
+    const b = el('button', { class: 'plinko-row-btn' + (r === rows ? ' active' : '') }, `${r} рядов`);
+    b.addEventListener('click', () => {
+      rows = r;
+      Array.from(rowsRow.children).forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      drawPlinko(canvas, rows, [], null, []);
+    });
+    rowsRow.appendChild(b);
+  });
+
+  const riskRow = el('div', { class: 'plinko-rows' });
+  ['low','medium','high'].forEach(rk => {
+    const b = el('button', { class: 'plinko-row-btn' + (rk === risk ? ' active' : '') }, rk);
+    b.addEventListener('click', () => {
+      risk = rk;
+      Array.from(riskRow.children).forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+    });
+    riskRow.appendChild(b);
+  });
+
+  function renderBins(table, hitIdx) {
     binsHost.innerHTML = '';
     if (!table) return;
+    binsHost.style.gridTemplateColumns = `repeat(${table.length}, 1fr)`;
     const max = Math.max(...table);
     table.forEach((m, i) => {
       const intensity = Math.min(1, Math.log(m + 1) / Math.log(max + 1));
+      const isHit = i === hitIdx;
       const b = el('div', {
-        class: 'plinko-bin',
-        style: { background: `linear-gradient(180deg, rgba(184,92,255,${intensity * 0.5}), rgba(255,77,139,${intensity * 0.4}))` }
+        style: `background: linear-gradient(180deg, rgba(197,255,0,${intensity * 0.4}), rgba(77,217,255,${intensity * 0.3})); padding: 6px 0; text-align: center; font-size: 10px; font-weight: 800; border-radius: 6px; color: ${isHit ? '#0a0a0a' : 'white'}; ${isHit ? 'background: var(--lime);' : ''}`,
       }, `${m}×`);
       binsHost.appendChild(b);
     });
   }
 
-  drawPlinko(canvas, rows, []);
-
-  const ctrl = betControls({
+  const panel = betPanel({
+    label: 'Бросить',
+    payoutText: 'Выплата',
     onPlay: async (bet) => {
       if (bet <= 0) return toast('Введите ставку', 'error');
-      ctrl.setBusy(true);
-      status.textContent = 'Шарик летит…';
+      panel.setBusy(true);
       try {
         const r = await api.play('plinko', bet, { rows, risk });
-        renderBins(r.result.table);
-        await animateBall(canvas, rows, r.result.path);
-        if (r.win) {
-          status.innerHTML = `🎉 Корзина ${r.result.bin} · ${r.multiplier}× — +${fmt(r.payout)} AC`;
-          confettiBurst(50);
-        } else {
-          status.innerHTML = `<span class="lose">Корзина ${r.result.bin} · ${r.multiplier}×</span>`;
-        }
+        renderBins(r.result.table, r.result.bin);
+        await animateBall(canvas, rows, r.result.path, r.result.table, r.result.bin);
+        HISTORY.unshift({ value: r.multiplier + '×', win: r.win, lose: !r.win, big: r.multiplier >= 5 });
+        rerender(histStrip);
         flashEl(document.getElementById('balance-pill'));
         await refreshUser();
       } catch (err) {
         toast(err.message || 'Ошибка', 'error');
       } finally {
-        ctrl.setBusy(false);
+        panel.setBusy(false);
       }
     },
-    label: '🪙 Бросить',
   });
 
-  return el('div', { class: 'page' },
-    el('div', { class: 'game-header' },
-      el('div', { class: 'title' }, '🪙 Plinko'),
-      el('a', { class: 'btn outline', href: '#/games' }, '← Назад'),
-    ),
+  return gameShell({
+    gameId: 'plinko',
+    title: 'Plinko',
+    history: histStrip,
     stage,
-    binsHost,
-    status,
-    el('div', { class: 'card mt-12' },
-      el('div', { class: 'label' }, 'Ряды'),
-      rowChips,
-      el('div', { class: 'label mt-12' }, 'Риск'),
-      riskChips,
-    ),
-    ctrl.node,
-  );
+    extras: [binsHost, rowsRow, riskRow],
+    controls: panel.node,
+  });
 }
 
-function drawPlinko(canvas, rows, ballPath) {
+function drawPlinko(canvas, rows, ballPath, ballPos, table) {
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
-  const padX = 18, padY = 8;
-  const dy = (H - padY * 2 - 20) / rows;
+  const padX = 24, padY = 14;
+  const usableH = H - padY * 2;
+  const dy = usableH / (rows + 1);
+
   // pegs
   for (let r = 0; r < rows; r++) {
-    const cnt = r + 2;
+    const cnt = r + 3;
+    const totalW = (cnt - 1) * dy * 0.9;
+    const offset = (W - totalW) / 2;
     for (let i = 0; i < cnt; i++) {
-      const x = padX + ((W - padX * 2) / (cnt - 1 || 1)) * i;
+      const x = offset + i * dy * 0.9;
       const y = padY + dy * (r + 1);
-      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 7);
-      ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.shadowColor = 'rgba(197,255,0,0.4)';
+      ctx.shadowBlur = 4;
+      ctx.fill();
+      ctx.shadowBlur = 0;
     }
   }
+
   // ball trail
   if (ballPath.length) {
-    ctx.strokeStyle = '#ffc857'; ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(197,255,0,0.4)'; ctx.lineWidth = 2;
     ctx.beginPath();
-    let xpos = W / 2; let ypos = padY;
+    let xpos = W / 2, ypos = padY;
     ctx.moveTo(xpos, ypos);
     for (let r = 0; r < ballPath.length; r++) {
       const dir = ballPath[r] ? 1 : -1;
-      // shift by half a peg gap
-      const cnt = r + 2;
-      const gap = (W - padX * 2) / (cnt);
-      xpos += dir * gap / 2;
+      xpos += dir * dy * 0.45;
       ypos += dy;
       ctx.lineTo(xpos, ypos);
     }
     ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(xpos, ypos, 5, 0, 7); ctx.fill();
+  }
+
+  // ball position
+  if (ballPos) {
+    ctx.fillStyle = '#c5ff00';
+    ctx.shadowColor = '#c5ff00';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(ballPos.x, ballPos.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
   }
 }
 
-function animateBall(canvas, rows, path) {
+function animateBall(canvas, rows, path, table, finalBin) {
   return new Promise(res => {
+    const W = canvas.width, H = canvas.height;
+    const padY = 14;
+    const dy = (H - padY * 2) / (rows + 1);
     let step = 0;
+    let x = W / 2, y = padY;
     function tick() {
-      drawPlinko(canvas, rows, path.slice(0, step));
-      step++;
-      if (step <= path.length) setTimeout(tick, 90);
-      else res();
+      const trail = path.slice(0, step);
+      drawPlinko(canvas, rows, trail, { x, y }, table);
+      if (step < path.length) {
+        const dir = path[step] ? 1 : -1;
+        x += dir * dy * 0.45;
+        y += dy;
+        step++;
+        setTimeout(tick, 60);
+      } else {
+        res();
+      }
     }
     tick();
+  });
+}
+
+function rerender(strip) {
+  while (strip.children.length > 1) strip.removeChild(strip.lastChild);
+  HISTORY.slice(0, 12).forEach(it => {
+    const cls = 'hist-pill' + (it.big ? ' big' : it.win ? ' win' : ' lose');
+    const sp = document.createElement('span');
+    sp.className = cls;
+    sp.textContent = it.value;
+    strip.appendChild(sp);
   });
 }
